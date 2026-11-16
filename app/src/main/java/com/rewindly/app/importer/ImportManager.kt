@@ -26,13 +26,14 @@ data class ImportReport(
 
 class ImportManager(private val context: Context, private val repo: RewindlyRepository) {
 
-    suspend fun import(uri: Uri, onProgress: (Int) -> Unit = {}): ImportReport = withContext(Dispatchers.IO) {
+    suspend fun import(uri: Uri, displayName: String? = null, onProgress: (Int) -> Unit = {}): ImportReport = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
-        var name: String? = null
+        var name: String? = displayName
         var size: Long? = null
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+        if (uri.scheme == "file") size = uri.path?.let { java.io.File(it).length() }
+        else resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
             if (c.moveToFirst()) {
-                name = c.getString(0)
+                name = name ?: c.getString(0)
                 size = if (c.isNull(1)) null else c.getLong(1)
             }
         }

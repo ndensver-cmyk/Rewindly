@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.rewindly.app.analytics.StatsResult
 import com.rewindly.app.data.entities.Sources
 import com.rewindly.app.data.repository.RewindlyRepository
+import com.rewindly.app.importer.AutoImport
 import com.rewindly.app.importer.ImportManager
 import com.rewindly.app.importer.ImportReport
 import com.rewindly.app.lastfm.LastFmClient
@@ -66,7 +67,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun importFile(uri: Uri) = viewModelScope.launch {
         _import.value = ImportState.Running(0, "Leyendo archivo…")
         _import.value = try {
-            val r = importer.import(uri) { n -> _import.value = ImportState.Running(n, "Procesando reproducciones…") }
+            val r = importer.import(uri) { n: Int -> _import.value = ImportState.Running(n, "Procesando reproducciones…") }
             refreshStats()
             ImportState.Done(r)
         } catch (e: Exception) {
@@ -83,6 +84,61 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: Exception) {
             ImportState.Error(e.message ?: "No se pudo sincronizar Last.fm.")
         }
+    }
+
+    // ---------- Tema ----------
+    private val _theme = MutableStateFlow(settings.themeMode)
+    val themeMode: StateFlow<String> = _theme.asStateFlow()
+    fun setTheme(mode: String) { settings.themeMode = mode; _theme.value = mode }
+
+    // ---------- Automatización ----------
+    private val _autoTick = MutableStateFlow(0)
+    /** Cambia cada vez que se modifica la configuración automática, para refrescar la UI. */
+    val autoTick: StateFlow<Int> = _autoTick.asStateFlow()
+    fun autoChanged() { _autoTick.value++; updateSchedules() }
+
+    private var foregroundBusy = false
+
+    /** Al abrir la app: busca ZIP nuevos y sincroniza Last.fm en silencio si toca. */
+    fun onAppForeground() {
+        if (foregroundBusy || _import.value is ImportState.Running) return
+        val ctx = getApplication<Application>()
+        val now = System.currentTimeMillis()
+        val scan = AutoImport.isEnabled(ctx) && now - settings.lastAutoScanAt > 60_000
+        val lastFm = settings.lastFmAutoSync && settings.lastFmUser.isNotBlank() && settings.lastFmApiKey.isNotBlank() &&
+            now - settings.lastFmSyncedAt > 30 * 60_000
+        if (!scan && !lastFm) return
+        foregroundBusy = true
+        viewModelScope.launch {
+            try {
+                if (scan) {
+                    val r = AutoImport.run(ctx)
+                    if (r.imported.isNotEmpty()) {
+                        _message.value = "Importado automáticamente: ${r.imported.sumOf { it.inserted }} reproducciones nuevas de ${r.imported.size} archivo(s)."
+                        _import.value = ImportState.Done(r.imported.last())
+                    } else if (r.errors.isNotEmpty()) _message.value = r.errors.first()
+                }
+                if (lastFm) runCatching { LastFmClient(repo).sync() }
+                refreshStats()
+            } finally { foregroundBusy = false; _autoTick.value++ }
+        }
+    }
+
+    fun scanNow() = viewModelScope.launch {
+        _import.value = ImportState.Running(0, "Buscando exportaciones de Spotify…")
+        val r = AutoImport.run(getApplication())
+        _autoTick.value++
+        _import.value = when {
+            r.imported.isNotEmpty() -> { refreshStats(); ImportState.Done(r.imported.last()) }
+            r.errors.isNotEmpty() -> ImportState.Error(r.errors.joinToString("\n"))
+            else -> { _message.value = "No hay archivos nuevos de Spotify por ahora."; ImportState.Idle }
+        }
+    }
+
+    fun markRequested(requested: Boolean) {
+        settings.spotifyRequestedAt = if (requested) System.currentTimeMillis() else 0L
+        settings.requestNotifiedStage = 0
+        autoChanged()
     }
 
     fun resetImportState() { _import.value = ImportState.Idle }

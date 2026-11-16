@@ -62,7 +62,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rewindly.app.analytics.StatsEngine
-import com.rewindly.app.ui.theme.StoryPalettes
+import com.rewindly.app.ui.theme.StoryStyles
+import com.rewindly.app.ui.theme.Serif
+import com.rewindly.app.ui.theme.MonoFont
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.border
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
@@ -90,6 +95,7 @@ fun StoryViewer(
         if (pager.currentPage < scenes.lastIndex) pager.animateScrollToPage(pager.currentPage + 1)
     }
 
+    val fg = StoryStyles[scenes[pager.currentPage.coerceIn(0, scenes.lastIndex)].palette % StoryStyles.size].fg
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
             SceneView(scenes[page], visible = page == pager.currentPage)
@@ -117,59 +123,64 @@ fun StoryViewer(
                         i == pager.currentPage -> progress.value
                         else -> 0f
                     }
-                    Box(Modifier.weight(1f).height(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.25f))) {
-                        Box(Modifier.fillMaxWidth(f).fillMaxHeight().background(Color.White))
+                    Box(Modifier.weight(1f).height(2.dp).background(fg.copy(alpha = 0.22f))) {
+                        Box(Modifier.fillMaxWidth(f).fillMaxHeight().background(fg))
                     }
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("REWINDLY", color = Color.White, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                IconButton(onClick = { onExportPng(pager.currentPage) }) { Icon(Icons.Default.Image, "Exportar imagen", tint = Color.White) }
-                IconButton(onClick = onExportPdf) { Icon(Icons.Default.PictureAsPdf, "Exportar PDF", tint = Color.White) }
-                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar", tint = Color.White) }
+                Text("REWINDLY", color = fg, style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 3.sp), modifier = Modifier.weight(1f))
+                IconButton(onClick = { onExportPng(pager.currentPage) }) { Icon(Icons.Default.Image, "Exportar imagen", tint = fg) }
+                IconButton(onClick = onExportPdf) { Icon(Icons.Default.PictureAsPdf, "Exportar PDF", tint = fg) }
+                IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Cerrar", tint = fg) }
             }
         }
     }
 }
 
+private val LocalStoryFg = staticCompositionLocalOf { Color.White }
+
 @Composable
 fun SceneView(scene: StoryScene, visible: Boolean) {
-    val colors = StoryPalettes[scene.palette % StoryPalettes.size]
+    val style = StoryStyles[scene.palette % StoryStyles.size]
+    val fg = style.fg
     val t = rememberInfiniteTransition(label = "bg")
     val phase by t.animateFloat(0f, 1f, infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Reverse), label = "phase")
 
+    CompositionLocalProvider(LocalStoryFg provides fg) {
     Box(
-        Modifier.fillMaxSize().background(
-            Brush.linearGradient(
-                listOf(colors[0], lerp(colors[1], colors[0], phase * 0.5f), lerp(colors[2], colors[1], phase)),
-                start = Offset(0f, 0f), end = Offset(800f * (1 + phase), 2200f)
+        Modifier.fillMaxSize().background(style.bg).background(
+            Brush.radialGradient(
+                listOf(fg.copy(alpha = 0.07f), Color.Transparent),
+                center = Offset(200f + 700f * phase, 300f + 1200f * phase), radius = 1100f
             )
         )
     ) {
-        Particles(colors[2])
+        Grooves(fg, phase)
+        Particles(fg)
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 28.dp, vertical = 72.dp),
             verticalArrangement = Arrangement.Center
         ) {
-            Reveal(visible, 0) { Text(scene.eyebrow.uppercase(), color = Color.White.copy(0.75f), style = MaterialTheme.typography.labelSmall) }
+            Reveal(visible, 0) { Text(scene.eyebrow.uppercase(), color = fg.copy(0.7f), style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 2.sp)) }
             Spacer(Modifier.height(10.dp))
             Reveal(visible, 150) {
-                Text(scene.title, color = Color.White, fontSize = if (scene.kind == SceneKind.COVER) 44.sp else 30.sp,
-                    fontWeight = FontWeight.Black, lineHeight = if (scene.kind == SceneKind.COVER) 48.sp else 34.sp)
+                Text(scene.title, color = fg, fontFamily = Serif, fontSize = if (scene.kind == SceneKind.COVER) 58.sp else 38.sp,
+                    lineHeight = if (scene.kind == SceneKind.COVER) 56.sp else 38.sp, letterSpacing = (-0.8).sp)
             }
             Spacer(Modifier.height(24.dp))
             scene.bigNumber?.let { n ->
                 Reveal(visible, 300) {
                     Column {
                         AnimatedCounter(n, visible)
-                        scene.bigUnit?.let { Text(it, color = Color.White.copy(0.85f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold) }
+                        scene.bigUnit?.let { Text(it.uppercase(), color = fg.copy(0.75f), fontFamily = MonoFont, fontSize = 14.sp, letterSpacing = 2.sp) }
                     }
                 }
                 Spacer(Modifier.height(20.dp))
             }
             scene.bigText?.let {
                 Reveal(visible, 300) {
-                    Text(it, color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Black, lineHeight = 50.sp,
+                    Text(it, color = fg, fontFamily = Serif, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, fontSize = 54.sp, lineHeight = 54.sp,
                         maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
                 Spacer(Modifier.height(20.dp))
@@ -178,15 +189,13 @@ fun SceneView(scene: StoryScene, visible: Boolean) {
                 scene.items.forEachIndexed { i, item ->
                     Reveal(visible, 420 + i * 120) {
                         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(0.16f)), contentAlignment = Alignment.Center) {
-                                Text("${i + 1}", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
-                            }
+                            Text("%02d".format(i + 1), color = fg.copy(if (i == 0) 1f else 0.55f), fontFamily = MonoFont, fontSize = 14.sp, modifier = Modifier.width(30.dp))
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(item.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(item.name, color = fg, fontFamily = Serif, fontSize = if (i == 0) 30.sp else 24.sp, lineHeight = 28.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     listOfNotNull(item.subtitle, "${item.plays} plays", StatsEngine.formatMinutes(item.ms)).joinToString(" · "),
-                                    color = Color.White.copy(0.7f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    color = fg.copy(0.7f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -203,9 +212,10 @@ fun SceneView(scene: StoryScene, visible: Boolean) {
                     Reveal(visible, 350 + row * 140) {
                         Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             pair.forEach { (k, v) ->
-                                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(Color.White.copy(0.12f)).padding(14.dp)) {
-                                    Text(k.uppercase(), color = Color.White.copy(0.7f), style = MaterialTheme.typography.labelSmall)
-                                    Text(v, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Column(Modifier.weight(1f).border(1.dp, fg.copy(0.25f)).padding(14.dp)) {
+                                    Text(k.uppercase(), color = fg.copy(0.65f), style = MaterialTheme.typography.labelSmall)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(v, color = fg, fontFamily = Serif, fontSize = 24.sp, lineHeight = 26.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
                             }
                             if (pair.size == 1) Spacer(Modifier.weight(1f))
@@ -215,9 +225,10 @@ fun SceneView(scene: StoryScene, visible: Boolean) {
                 Spacer(Modifier.height(16.dp))
             }
             scene.body?.let {
-                Reveal(visible, 700) { Text(it, color = Color.White.copy(0.9f), fontSize = 17.sp, lineHeight = 24.sp) }
+                Reveal(visible, 700) { Text(it, color = fg.copy(0.85f), fontSize = 16.sp, lineHeight = 23.sp) }
             }
         }
+    }
     }
 }
 
@@ -241,7 +252,8 @@ private fun AnimatedCounter(target: Long, visible: Boolean) {
         if (visible) { anim.snapTo(0f); anim.animateTo(1f, tween(1800, easing = FastOutSlowInEasing)) }
     }
     val value = (target * anim.value).toLong()
-    Text("%,d".format(value).replace(',', '.'), color = Color.White, fontSize = 72.sp, fontWeight = FontWeight.Black, lineHeight = 76.sp)
+    val fg = LocalStoryFg.current
+    Text("%,d".format(value).replace(',', '.'), color = fg, fontFamily = Serif, fontSize = 96.sp, lineHeight = 92.sp, letterSpacing = (-2).sp)
 }
 
 @Composable
@@ -249,14 +261,15 @@ private fun GrowingBars(bars: List<com.rewindly.app.analytics.NamedValue>, visib
     val anim = remember { Animatable(0f) }
     LaunchedEffect(visible) { if (visible) { anim.snapTo(0f); anim.animateTo(1f, tween(1400, easing = FastOutSlowInEasing)) } }
     val max = (bars.maxOfOrNull { it.value } ?: 1L).coerceAtLeast(1L)
+    val fg = LocalStoryFg.current
     if (showLabels) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             bars.forEach { b ->
                 Column {
-                    Row { Text(b.label, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); Text(StatsEngine.formatMinutes(b.value), color = Color.White.copy(0.8f)) }
+                    Row { Text(b.label, color = fg, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)); Text(StatsEngine.formatMinutes(b.value), color = fg.copy(0.75f), fontFamily = MonoFont, fontSize = 13.sp) }
                     Spacer(Modifier.height(4.dp))
-                    Box(Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(Color.White.copy(0.12f))) {
-                        Box(Modifier.fillMaxWidth((b.value.toFloat() / max) * anim.value).fillMaxHeight().clip(CircleShape).background(Color.White))
+                    Box(Modifier.fillMaxWidth().height(6.dp).background(fg.copy(0.12f))) {
+                        Box(Modifier.fillMaxWidth((b.value.toFloat() / max) * anim.value).fillMaxHeight().background(fg))
                     }
                 }
             }
@@ -266,11 +279,10 @@ private fun GrowingBars(bars: List<com.rewindly.app.analytics.NamedValue>, visib
             val w = size.width / bars.size
             bars.forEachIndexed { i, b ->
                 val h = size.height * (b.value.toFloat() / max) * anim.value
-                drawRoundRect(
-                    color = Color.White.copy(alpha = 0.85f),
+                drawRect(
+                    color = fg.copy(alpha = 0.85f),
                     topLeft = Offset(i * w + w * 0.15f, size.height - h),
-                    size = androidx.compose.ui.geometry.Size(w * 0.7f, h.coerceAtLeast(2f)),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.3f)
+                    size = androidx.compose.ui.geometry.Size(w * 0.7f, h.coerceAtLeast(2f))
                 )
             }
         }
@@ -288,12 +300,29 @@ private fun Particles(tint: Color) {
             seeds.forEach { (x, y, s) ->
                 val yy = ((y - time * (0.2f + s * 0.3f)) % 1f + 1f) % 1f
                 val xx = x + 0.03f * sin((time * 2 * PI + s * 10).toFloat())
-                drawCircle(
-                    color = tint.copy(alpha = 0.10f + s * 0.18f),
-                    radius = 3f + s * 9f,
-                    center = Offset(xx * size.width, yy * size.height)
+                val side = 2f + s * 6f
+                drawRect(
+                    color = tint.copy(alpha = 0.06f + s * 0.14f),
+                    topLeft = Offset(xx * size.width, yy * size.height),
+                    size = androidx.compose.ui.geometry.Size(side, side)
                 )
             }
+        }
+    }
+}
+
+/** Surcos de vinilo: círculos concéntricos finos que respiran lentamente en una esquina. */
+@Composable
+private fun Grooves(fg: Color, phase: Float) {
+    Canvas(Modifier.fillMaxSize()) {
+        val c = Offset(size.width * 1.05f, size.height * 0.92f)
+        for (i in 1..14) {
+            drawCircle(
+                color = fg.copy(alpha = 0.05f + (i % 3) * 0.015f),
+                radius = i * 46f + phase * 30f,
+                center = c,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2f)
+            )
         }
     }
 }

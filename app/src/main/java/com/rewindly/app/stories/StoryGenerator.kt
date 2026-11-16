@@ -93,7 +93,7 @@ object StoryGenerator {
             SceneKind.DISCOVERY, "DESCUBRIMIENTO", "Abriste tus oídos a",
             bigNumber = s.newArtistsCount.toLong(), bigUnit = if (s.newArtistsCount == 1) "artista nuevo" else "artistas nuevos",
             body = buildString {
-                append("${s.newTracksCount} canciones sonaron por primera vez.")
+                append(if (s.newTracksCount == 1) "1 canción sonó por primera vez." else "${s.newTracksCount} canciones sonaron por primera vez.")
                 if (s.returnedTracks.isNotEmpty()) append("\nY volviste a ${s.returnedTracks.first().name}: ${s.returnedTracks.first().extra?.lowercase()}.")
             },
             items = s.newArtists.take(3), palette = (pal + 5) % 9

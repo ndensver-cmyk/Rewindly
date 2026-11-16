@@ -43,15 +43,26 @@ import com.rewindly.app.data.entities.Sources
 import com.rewindly.app.ui.AppViewModel
 import com.rewindly.app.ui.Periods
 import com.rewindly.app.ui.ReportType
-import com.rewindly.app.ui.components.GradientCard
-import com.rewindly.app.ui.components.RCard
+import com.rewindly.app.ui.components.Hairline
+import com.rewindly.app.ui.components.LinkText
+import com.rewindly.app.ui.components.PrimaryButton
 import com.rewindly.app.ui.components.SectionTitle
-import com.rewindly.app.ui.theme.RColors
+import com.rewindly.app.ui.theme.Serif
+import com.rewindly.app.ui.theme.mono
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.withStyle
+import java.time.LocalDate
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val dateFmt = DateTimeFormatter.ofPattern("d MMM yyyy", Locale("es"))
+private val todayFmt = DateTimeFormatter.ofPattern("EEE d MMM", Locale("es"))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,70 +74,89 @@ fun HomeScreen(vm: AppViewModel, onGoImport: () -> Unit, onGoHistory: () -> Unit
     val reports by vm.reports.collectAsState()
     var showPicker by remember { mutableStateOf(false) }
     val zone = vm.settings.zone()
+    val m = mono
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-        Spacer(Modifier.height(20.dp))
-        Text("REWINDLY", style = MaterialTheme.typography.labelSmall, color = RColors.Coral)
-        Text("Tu música.\nTu historia.", style = MaterialTheme.typography.displaySmall, lineHeight = 40.sp)
-        Spacer(Modifier.height(16.dp))
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("REWINDLY", style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 3.sp), color = m.fg, modifier = Modifier.weight(1f))
+            Text(LocalDate.now(zone).format(todayFmt).uppercase(), style = MaterialTheme.typography.labelSmall, color = m.dim)
+        }
+        Spacer(Modifier.height(36.dp))
 
-        GradientCard(listOf(Color(0xFF3B1D6E), Color(0xFF8B2F6B), RColors.Coral)) {
-            if (count == 0) {
-                Text("Aún no hay música", color = Color.White, style = MaterialTheme.typography.titleLarge)
+        if (count == 0) {
+            Text(
+                buildAnnotatedString { append("Tu música,\n"); withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append("rebobinada.") } },
+                style = MaterialTheme.typography.displayLarge, color = m.fg
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Aún no hay reproducciones. Activa el registro en vivo o conecta Last.fm y empieza hoy; cuando llegue tu ZIP de Spotify se fusiona solo, sin duplicados.",
+                style = MaterialTheme.typography.bodyLarge, color = m.dim
+            )
+            Spacer(Modifier.height(22.dp))
+            PrimaryButton("Configurar mis datos", onGoImport, Modifier.fillMaxWidth())
+        } else {
+            Text("REPRODUCCIONES GUARDADAS", style = MaterialTheme.typography.labelSmall, color = m.dim)
+            Spacer(Modifier.height(6.dp))
+            Text("%,d".format(count).replace(',', '.'), style = MaterialTheme.typography.displayLarge.copy(fontSize = 84.sp, lineHeight = 80.sp), color = m.fg)
+            if (min != null && max != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Empieza hoy mismo: activa el registro en vivo o conecta Last.fm. Cuando llegue tu ZIP de Spotify, lo fusionamos sin duplicar.",
-                    color = Color.White.copy(0.9f)
+                    "${Instant.ofEpochMilli(min!!).atZone(zone).format(dateFmt)} — ${Instant.ofEpochMilli(max!!).atZone(zone).format(dateFmt)}".uppercase(),
+                    style = MaterialTheme.typography.labelMedium, color = m.dim
                 )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onGoImport) { Text("Añadir mis datos") }
-            } else {
-                Text("%,d".format(count).replace(',', '.'), color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Black)
-                Text("reproducciones guardadas en este teléfono", color = Color.White.copy(0.9f))
-                Spacer(Modifier.height(8.dp))
-                if (min != null && max != null) {
-                    Text(
-                        "Del ${Instant.ofEpochMilli(min!!).atZone(zone).format(dateFmt)} al ${Instant.ofEpochMilli(max!!).atZone(zone).format(dateFmt)}",
-                        color = Color.White.copy(0.85f), style = MaterialTheme.typography.bodyMedium
-                    )
+            }
+            Spacer(Modifier.height(20.dp))
+            Hairline()
+            sources.sortedByDescending { it.count }.forEach { sc ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(Sources.label(sc.source), style = MaterialTheme.typography.bodyMedium, color = m.fg, modifier = Modifier.weight(1f))
+                    Text("%,d".format(sc.count).replace(',', '.'), style = MaterialTheme.typography.labelMedium, color = m.dim)
                 }
-                Text(sources.joinToString(" · ") { "${Sources.label(it.source)}: ${it.count}" }, color = Color.White.copy(0.75f), style = MaterialTheme.typography.bodySmall)
+                Hairline()
             }
         }
 
-        SectionTitle("Tus informes musicales", "Se generan con los datos que ya tienes importados.")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReportTile("Semanal", "7 días", "Resumen de la semana", Icons.Default.ViewWeek, RColors.Violet, Modifier.weight(1f)) { vm.generateReport(ReportType.WEEKLY) }
-            ReportTile("Quincenal", "15 días", "Dos semanas de música", Icons.Default.Today, RColors.Teal, Modifier.weight(1f)) { vm.generateReport(ReportType.BIWEEKLY) }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReportTile("Mensual", "30 días", "Tu informe mensual", Icons.Default.CalendarMonth, RColors.Coral, Modifier.weight(1f)) { vm.generateReport(ReportType.MONTHLY) }
-            ReportTile("Personalizado", "Libre", "Elige las fechas", Icons.Default.DateRange, RColors.Amber, Modifier.weight(1f)) { showPicker = true }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ReportTile("Anual", "365 días", "Tu año, sin esperar a diciembre", Icons.Default.AutoAwesome, RColors.Rose, Modifier.weight(1f)) { vm.generateReport(ReportType.YEARLY) }
-            ReportTile("Todo", "Historia", "Toda tu vida musical", Icons.Default.AutoAwesome, RColors.Sky, Modifier.weight(1f)) { vm.generateReport(ReportType.ALL) }
+        SectionTitle("Informes", "Se generan al instante con lo que ya tienes importado.", "02")
+        val rows = listOf(
+            Triple<String, String, () -> Unit>("Semanal", "Últimos 7 días", { vm.generateReport(ReportType.WEEKLY) }),
+            Triple<String, String, () -> Unit>("Quincenal", "Últimos 15 días", { vm.generateReport(ReportType.BIWEEKLY) }),
+            Triple<String, String, () -> Unit>("Mensual", "Últimos 30 días", { vm.generateReport(ReportType.MONTHLY) }),
+            Triple<String, String, () -> Unit>("Anual", "Tu año, sin esperar a diciembre", { vm.generateReport(ReportType.YEARLY) }),
+            Triple<String, String, () -> Unit>("Toda la historia", "Desde tu primera reproducción", { vm.generateReport(ReportType.ALL) }),
+            Triple<String, String, () -> Unit>("Personalizado", "Elige las fechas", { showPicker = true })
+        )
+        rows.forEachIndexed { i, (title, sub, action) ->
+            if (i > 0) Hairline()
+            Row(Modifier.fillMaxWidth().clickable(onClick = action).padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("%02d".format(i + 1), style = MaterialTheme.typography.labelSmall, color = m.faint, modifier = Modifier.width(34.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(title, fontFamily = Serif, fontSize = 24.sp, lineHeight = 26.sp, color = m.fg)
+                    Text(sub, style = MaterialTheme.typography.bodySmall, color = m.dim)
+                }
+                Text("→", style = MaterialTheme.typography.titleLarge, color = m.fg)
+            }
         }
 
         if (reports.isNotEmpty()) {
-            SectionTitle("Últimos informes")
-            reports.take(3).forEach { r ->
-                RCard(Modifier.padding(bottom = 8.dp).clickable { vm.openReport(r.id) }) {
-                    Text(r.title, fontWeight = FontWeight.SemiBold)
-                    Text(r.personality, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            SectionTitle("Recientes", null, "03")
+            reports.take(3).forEachIndexed { i, r ->
+                if (i > 0) Hairline()
+                Column(Modifier.fillMaxWidth().clickable { vm.openReport(r.id) }.padding(vertical = 12.dp)) {
+                    Text(r.title, style = MaterialTheme.typography.titleSmall, color = m.fg)
+                    Text(r.personality, style = MaterialTheme.typography.bodySmall, color = m.dim)
                 }
             }
-            TextButton(onClick = onGoHistory) { Text("Ver biblioteca de informes") }
+            LinkText("Ver biblioteca", onGoHistory)
         }
 
-        SectionTitle("Privado por diseño")
-        RCard {
-            Text("Rewindly no inicia sesión en Spotify, no pide contraseñas y no envía tu historial a ningún servidor. Todo se calcula en este teléfono.",
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(32.dp))
+        Hairline()
+        Text(
+            "SIN INICIO DE SESIÓN EN SPOTIFY · SIN SERVIDORES · TODO SE CALCULA EN ESTE TELÉFONO",
+            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 15.sp), color = m.faint, modifier = Modifier.padding(vertical = 14.dp)
+        )
+        Spacer(Modifier.height(12.dp))
     }
 
     if (showPicker) {
@@ -147,15 +177,3 @@ fun HomeScreen(vm: AppViewModel, onGoImport: () -> Unit, onGoHistory: () -> Unit
     }
 }
 
-@Composable
-private fun ReportTile(title: String, big: String, sub: String, icon: ImageVector, accent: Color, modifier: Modifier, onClick: () -> Unit) {
-    Surface(modifier = modifier.clickable(onClick = onClick), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Column(Modifier.padding(14.dp)) {
-            Icon(icon, null, tint = accent)
-            Spacer(Modifier.height(8.dp))
-            Text(title.uppercase(), style = MaterialTheme.typography.labelSmall, color = accent)
-            Text(big, style = MaterialTheme.typography.headlineSmall)
-            Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-        }
-    }
-}

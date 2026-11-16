@@ -20,7 +20,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.rewindly.app.MainActivity
 import com.rewindly.app.R
+import com.rewindly.app.data.entities.Sources
 import com.rewindly.app.data.repository.RewindlyRepository
+import com.rewindly.app.importer.AutoImport
 import com.rewindly.app.lastfm.LastFmClient
 import com.rewindly.app.stories.StoryGenerator
 import com.rewindly.app.ui.Periods
@@ -56,38 +58,85 @@ object Notifications {
     }
 }
 
-/** Cada semana genera automáticamente el informe semanal si hay datos de esos días. */
-class WeeklyReportWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+/** Diario: genera el informe semanal (lunes a domingo) y el mensual cuando se completa el período. */
+class AutoReportWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val repo = RewindlyRepository.get(applicationContext)
-        if (!repo.settings.weeklyAutoReport) return Result.success()
-        val (start, end) = Periods.lastCompletedWeek(repo.settings.zone())
-        if (repo.reportExists(ReportType.WEEKLY.name, start, end)) return Result.success()
-        val stats = repo.computeStats(start, end)
-        if (stats.isEmpty) return Result.success()
-        repo.saveReport(ReportType.WEEKLY.name, "Semanal · ${StoryGenerator.dateRange(stats)}", stats)
-        Notifications.show(
-            applicationContext, 1001, "Tu semana en música está lista",
-            "${stats.totalMs / 60_000} minutos · Tu artista principal: ${stats.topArtists.firstOrNull()?.name ?: "—"}. Abre Rewindly para ver tus historias."
-        )
+        val zone = repo.settings.zone()
+        suspend fun make(type: ReportType, range: Pair<Long, Long>, id: Int, title: String) {
+            if (repo.reportExists(type.name, range.first, range.second)) return
+            val stats = repo.computeStats(range.first, range.second)
+            if (stats.isEmpty) return
+            repo.saveReport(type.name, "${type.label} · ${StoryGenerator.dateRange(stats)}", stats)
+            Notifications.show(
+                applicationContext, id, title,
+                "${stats.totalMs / 60_000} minutos · Artista principal: ${stats.topArtists.firstOrNull()?.name ?: "—"}. Abre Rewindly para verlo."
+            )
+        }
+        if (repo.settings.weeklyAutoReport) make(ReportType.WEEKLY, Periods.lastCompletedWeek(zone), 1001, "Tu semana en música está lista")
+        if (repo.settings.monthlyAutoReport) make(ReportType.MONTHLY, Periods.lastCompletedMonth(zone), 1003, "Tu mes en música está listo")
         return Result.success()
     }
 }
 
-/** Recordatorio mensual para pedir una exportación nueva a Spotify (el ZIP puede tardar). */
-class ExportReminderWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+/**
+ * Diario: acompaña la solicitud a Spotify. A los 5 días avisa que debería haber llegado
+ * "Datos de la cuenta" y a los 30 el historial extendido. Se detiene cuando ya se importaron.
+ */
+class RequestTrackerWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val repo = RewindlyRepository.get(applicationContext)
-        if (!repo.settings.exportReminder) return Result.success()
+        val s = repo.settings
+        val req = s.spotifyRequestedAt
+        if (req == 0L) {
+            if (s.exportReminder) monthlyReminder(s)
+            return Result.success()
+        }
+        val days = (System.currentTimeMillis() - req) / 86_400_000L
+        val gotAccount = (repo.lastBatch(Sources.ZIP_ACCOUNT)?.createdAt ?: 0) > req
+        val gotExtended = (repo.lastBatch(Sources.ZIP_EXTENDED)?.createdAt ?: 0) > req
+        val auto = AutoImport.isEnabled(applicationContext)
+        val tail = if (auto) "Descárgalo desde el correo de Spotify: Rewindly lo detectará y lo importará solo."
+            else "Descárgalo desde el correo de Spotify y ábrelo con Rewindly."
+        if (gotExtended) { s.spotifyRequestedAt = 0; s.requestNotifiedStage = 0; return Result.success() }
+        if (days >= 5 && !gotAccount && s.requestNotifiedStage < 1) {
+            Notifications.show(applicationContext, 1004, "Tus datos de cuenta deberían estar listos", tail)
+            s.requestNotifiedStage = 1
+        }
+        if (days >= 30 && s.requestNotifiedStage < 2) {
+            Notifications.show(applicationContext, 1005, "Revisa tu correo: historial extendido", tail)
+            s.requestNotifiedStage = 2
+        }
+        return Result.success()
+    }
+
+    private fun monthlyReminder(s: com.rewindly.app.data.repository.Settings) {
+        val day = java.time.LocalDate.now(s.zone()).dayOfMonth
+        if (day != 1) return
         Notifications.show(
             applicationContext, 1002, "¿Pedimos datos nuevos a Spotify?",
-            "Solicita tu historial en Privacidad de la cuenta. Mientras llega, el registro en vivo y Last.fm siguen sumando reproducciones."
+            "Solicita tu historial en Privacidad de la cuenta y márcalo en Rewindly. Mientras llega, el registro en vivo y Last.fm siguen sumando."
         )
+    }
+}
+
+/** Busca exportaciones nuevas en Descargas o en la carpeta vigilada y las importa. */
+class AutoImportWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        if (!AutoImport.isEnabled(applicationContext)) return Result.success()
+        val r = AutoImport.run(applicationContext)
+        val inserted = r.imported.sumOf { it.inserted }
+        if (r.imported.isNotEmpty()) {
+            Notifications.show(
+                applicationContext, 1006, "Datos de Spotify importados automáticamente",
+                "Se encontraron ${r.imported.size} archivo(s) y se añadieron $inserted reproducciones nuevas."
+            )
+        }
         return Result.success()
     }
 }
 
-/** Sincronización periódica de Last.fm (opcional, solo con red). */
+/** Sincronización periódica de Last.fm (solo con red). */
 class LastFmSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val repo = RewindlyRepository.get(applicationContext)
@@ -101,24 +150,27 @@ object Scheduler {
     fun apply(context: Context) {
         val wm = WorkManager.getInstance(context)
         val s = RewindlyRepository.get(context).settings
-        if (s.weeklyAutoReport) {
-            wm.enqueueUniquePeriodicWork(
-                "weekly_report", ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequestBuilder<WeeklyReportWorker>(7, TimeUnit.DAYS).setInitialDelay(1, TimeUnit.DAYS).build()
-            )
-        } else wm.cancelUniqueWork("weekly_report")
+        listOf("weekly_report", "export_reminder").forEach { wm.cancelUniqueWork(it) } // tareas de la v1.0
 
-        if (s.exportReminder) {
+        wm.enqueueUniquePeriodicWork(
+            "auto_reports", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<AutoReportWorker>(1, TimeUnit.DAYS).build()
+        )
+        wm.enqueueUniquePeriodicWork(
+            "request_tracker", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<RequestTrackerWorker>(1, TimeUnit.DAYS).build()
+        )
+        if (AutoImport.isEnabled(context)) {
             wm.enqueueUniquePeriodicWork(
-                "export_reminder", ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequestBuilder<ExportReminderWorker>(30, TimeUnit.DAYS).setInitialDelay(30, TimeUnit.DAYS).build()
+                "auto_import", ExistingPeriodicWorkPolicy.KEEP,
+                PeriodicWorkRequestBuilder<AutoImportWorker>(1, TimeUnit.HOURS).build()
             )
-        } else wm.cancelUniqueWork("export_reminder")
+        } else wm.cancelUniqueWork("auto_import")
 
-        if (s.lastFmAutoSync) {
+        if (s.lastFmAutoSync && s.lastFmUser.isNotBlank() && s.lastFmApiKey.isNotBlank()) {
             wm.enqueueUniquePeriodicWork(
                 "lastfm_sync", ExistingPeriodicWorkPolicy.UPDATE,
-                PeriodicWorkRequestBuilder<LastFmSyncWorker>(12, TimeUnit.HOURS)
+                PeriodicWorkRequestBuilder<LastFmSyncWorker>(3, TimeUnit.HOURS)
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .build()
             )

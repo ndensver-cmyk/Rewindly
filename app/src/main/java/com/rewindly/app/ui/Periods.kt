@@ -40,8 +40,15 @@ object Periods {
         return s.atStartOfDay(zone).toInstant().toEpochMilli() to e.atStartOfDay(zone).toInstant().toEpochMilli()
     }
 
+    /** Última semana completa de lunes a domingo. */
     fun lastCompletedWeek(zone: ZoneId, today: LocalDate = LocalDate.now(zone)): Pair<Long, Long> {
-        val end = today.atStartOfDay(zone).toInstant().toEpochMilli()
-        return end - 7 * DAY to end
+        val monday = today.minusDays((today.dayOfWeek.value - 1).toLong())
+        return monday.minusDays(7).atStartOfDay(zone).toInstant().toEpochMilli() to monday.atStartOfDay(zone).toInstant().toEpochMilli()
+    }
+
+    /** Último mes calendario completo. */
+    fun lastCompletedMonth(zone: ZoneId, today: LocalDate = LocalDate.now(zone)): Pair<Long, Long> {
+        val first = today.withDayOfMonth(1)
+        return first.minusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli() to first.atStartOfDay(zone).toInstant().toEpochMilli()
     }
 }

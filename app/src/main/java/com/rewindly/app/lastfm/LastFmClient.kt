@@ -67,6 +67,7 @@ class LastFmClient(private val repo: RewindlyRepository) {
             delay(250) // respetar el límite de peticiones de Last.fm
         }
         if (newest > from) s.lastFmLastSyncUts = newest
+        s.lastFmSyncedAt = System.currentTimeMillis()
         repo.finishBatch(
             com.rewindly.app.data.entities.ImportBatchEntity(
                 id = batchId, source = Sources.LASTFM, fileName = "last.fm/$user",
